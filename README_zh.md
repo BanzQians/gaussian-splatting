@@ -1,3 +1,17 @@
+## 免责声明
+
+本仓库基于 Kerbl 等人在 SIGGRAPH 2023 提出的  
+**3D Gaussian Splatting for Real-Time Radiance Field Rendering**
+官方实现进行开发。
+
+原始代码的版权归原作者所有。
+本项目主要关注 **3DGS 在室内场景中的实际失败模式分析**
+以及针对训练流程的工程性改进，
+尤其是边界清晰度与背景稳定性问题。
+
+官方仓库地址：
+https://github.com/graphdeco-inria/gaussian-splatting
+
 # 室内场景下 3D Gaussian Splatting 与 NeRF 的实验性研究记录
 
 本仓库记录了我在学习、复现并实验 **3D Gaussian Splatting（3DGS）与 NeRF 系方法** 过程中，围绕室内场景重建所进行的一系列系统性尝试。

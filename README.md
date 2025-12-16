@@ -1,3 +1,17 @@
+## Disclaimer
+
+This repository is **based on the official implementation** of  
+**3D Gaussian Splatting for Real-Time Radiance Field Rendering**  
+by Kerbl et al. (SIGGRAPH 2023).
+
+All original copyrights belong to the authors of the original repository.
+This project focuses on **empirical analysis and practical modifications**
+to the training pipeline, aiming to improve boundary sharpness and background
+stability in indoor scenes.
+
+The original codebase can be found at:
+https://github.com/graphdeco-inria/gaussian-splatting
+
 # An Empirical Study on 3D Gaussian Splatting and NeRF for Indoor Scene Reconstruction
 
 This repository documents a series of **systematic experiments conducted while learning, reproducing, and modifying 3D Gaussian Splatting (3DGS) and NeRF-based methods** for indoor scene reconstruction.
