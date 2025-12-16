@@ -191,6 +191,10 @@ Key observations:
 
 This highlights fundamental differences in representation rather than implementation details.
 
+
+https://github.com/user-attachments/assets/06a10d0e-dcd3-43d6-921d-2429324bdfd2
+
+
 ---
 
 ## 8. Key Findings
