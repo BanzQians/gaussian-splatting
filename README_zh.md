@@ -26,6 +26,7 @@ https://github.com/graphdeco-inria/gaussian-splatting
 
 因此，本仓库应被视为一个 **实验性与工程性的技术记录项目**，而非一个完整、封闭的算法方案。
 
+![assets/charts/customdata//comparison-0.png](assets/charts/customdata//comparison-0.png)
 ---
 
 ## 1. 项目范围说明
@@ -244,7 +245,7 @@ python train_changed.py \
   --densify_grad_threshold 0.0008 \
   --densification_interval 200 \
   --data_device cpu
-
+```
 OOM 约束在一定程度上影响了模型规模与实验设计。
 
 11. 说明

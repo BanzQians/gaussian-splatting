@@ -24,6 +24,8 @@ The focus of this project is **not to propose a new method**, but to:
 
 This repository should be read as an **experimental and engineering study**, rather than a polished algorithmic contribution.
 
+![assets/charts/customdata//comparison-0.png](assets/charts/customdata//comparison-0.png)
+
 ---
 
 ## 1. Scope of This Project
@@ -234,6 +236,8 @@ python train_changed.py \
   --densify_grad_threshold 0.0008 \
   --densification_interval 200 \
   --data_device cpu
+```
+---
 
 OOM constraints influenced both model design and experimental choices.
 11. Repository Structure

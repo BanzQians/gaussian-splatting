@@ -8,6 +8,11 @@
 #
 # For inquiries contact  george.drettakis@inria.fr
 #
+#  This file is not the same with the original file from the 3DGS repository.
+#  It has been modified to include additional functionalities such as
+#  saving rendered images and saving the Gaussian model in PLY format during training.
+#  And we have also added opacity regularization loss to improve the training stability.
+#
 
 import os
 import torch

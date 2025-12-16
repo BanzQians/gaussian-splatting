@@ -113,6 +113,8 @@
 
 该类修改只能在有限程度上改善背景稳定性，无法解决纯色区域缺乏结构的问题。
 
+![assets/charts/customdata//comparison-5.png](../assets/charts/customdata//comparison-5.png)
+
 ### 4.2 Densification 阈值实验
 
 对 densification 与 pruning 相关阈值进行了系统性测试，包括：
@@ -128,6 +130,8 @@
 
 该实验进一步表明，阈值调节本身无法从根本上解决结构缺失问题。
 
+![assets/charts/customdata//comparison-2.png](../assets/charts/customdata//comparison-2.png)
+
 ### 4.3 边界与背景定向处理
 
 针对室内场景中的典型结构（如墙角、平面交界），尝试对背景与边界区域施加定向处理策略。
@@ -139,6 +143,8 @@
 - 表明几何约束与外观一致性之间存在明显冲突。
 
 该阶段实验明确了边界增强方法的收益与代价。
+
+![assets/charts/customdata//comparison-3.png](../assets/charts/customdata//comparison-3.png)
 
 ## 5. Diffusion / Residual 实验分支（DCM）
 
@@ -161,6 +167,8 @@ DCM 的作用不是生成完整图像，而是：
 
 该实验分支被视为一种工程级增强尝试，而非核心方法。
 
+![assets/charts/customdata//comparison-4.png](../assets/charts/customdata//comparison-4.png)
+
 ## 6. 与 NeRF / Instant-NGP 的对比实验
 
 在相同数据集条件下，对 3DGS 与 Instant-NGP 进行了对比实验。
@@ -170,6 +178,7 @@ DCM 的作用不是生成完整图像，而是：
 - NeRF 系方法在连续纹理建模方面具有优势；
 - 3DGS 在边界清晰度与渲染效率上表现更好；
 - 对于重复、平坦的纹理区域，两类方法均存在明显局限。
+- 对于较低质量的数据集，在重建的时候NeRF存在更多的“漂浮物”
 
 该对比进一步表明，不同方法的表现差异源于表示方式本身，而非单一实现细节。
 
@@ -207,7 +216,7 @@ python train_changed.py \
   --densify_grad_threshold 0.0008 \
   --densification_interval 200 \
   --data_device cpu
-
+```
 ## 10. 总结
 
 本报告记录了一条从方法复现、失败分析到工程改进与边界确认的完整实验路径。实验表明，3DGS 在室内场景中具有明显优势，但同时也存在难以通过简单工程手段解决的结构性瓶颈。

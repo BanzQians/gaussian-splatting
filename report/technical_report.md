@@ -179,6 +179,7 @@ degenerate feature distributions.
 
 This reinforces that data processing quality critically bounds achievable 3DGS results.
 
+
 5. Core Problem: Background Boundaries and Texture-Less Regions
 
 Through the above experiments, a recurring failure pattern emerged:
@@ -225,6 +226,8 @@ Reduced floating artifacts
 
 Slight loss of fine detail in some regions
 
+![assets/charts/customdata//comparison-5.png](../assets/charts/customdata//comparison-5.png)
+
 6.2 Densification Threshold Experiments
 
 We systematically varied:
@@ -250,6 +253,7 @@ but loss of geometric definition.
 Conclusion
 
 Densification alone cannot resolve texture ambiguity in planar regions.
+![assets/charts/customdata//comparison-2.png](../assets/charts/customdata//comparison-2.png)
 
 6.3 Edge-Aware Background and Pure-Color Region Handling (Core Contribution)
 Motivation
@@ -286,6 +290,9 @@ This experiment demonstrates a key trade-off:
 
 Enforcing geometric boundaries improves structure but can distort photometric realism.
 
+![assets/charts/customdata//comparison-3.png](../assets/charts/customdata//comparison-3.png)
+
+
 7. Diffusion-Based Refinement
 
 To mitigate perceptual artifacts introduced by hard constraints, we applied diffusion-based refinement.
@@ -301,6 +308,8 @@ Weaker boundary sharpness
 Key Limitation
 
 Diffusion does not recover fine repetitive textures (e.g., floor patterns), indicating that such details are limited by the underlying representation and available geometric information.
+
+![assets/charts/customdata//comparison-4.png](../assets/charts/customdata//comparison-4.png)
 
 8. Comparison with NeRF-Based Methods (Instant-NGP)
 
