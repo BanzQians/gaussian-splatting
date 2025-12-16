@@ -203,6 +203,10 @@ https://github.com/graphdeco-inria/gaussian-splatting
 
 该对比强调了 **表示方式层面的差异**，而非单纯效果优劣。
 
+
+https://github.com/user-attachments/assets/ea550b3e-ecdf-40d0-b0bd-903194f28e36
+
+
 ---
 
 ## 8. 关键结论与经验总结
