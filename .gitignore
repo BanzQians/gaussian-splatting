@@ -1,8 +1,34 @@
+# datasets & outputs
+data/
+frames/
+dataset_refine/
+traindiff/
+
+# results & media
+*.mp4
+*.avi
+*.png
+*.jpg
+*.ply
+
+# logs & local files
+run.txt
+test_result.ini
+*.log
+
+# workspace / IDE
+*.code-workspace
+.vscode/
+.idea/
+
+# python cache
+__pycache__/
 *.pyc
-.vscode
-output
-build
-diff_rasterization/diff_rast.egg-info
-diff_rasterization/dist
-tensorboard_3d
-screenshots
+
+# training outputs
+output/
+
+# experimental scripts / local tools
+tools/
+render_train.py
+

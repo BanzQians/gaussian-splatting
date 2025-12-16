@@ -10,18 +10,23 @@
 #
 
 import os
-import torch
+import sys
+import uuid
 from random import randint
+
+import torch
+import torch.nn.functional as F
+from tqdm import tqdm
 from utils.loss_utils import l1_loss, ssim
 from gaussian_renderer import render, network_gui
-import sys
 from scene import Scene, GaussianModel
 from utils.general_utils import safe_state, get_expon_lr_func
-import uuid
-from tqdm import tqdm
 from utils.image_utils import psnr
 from argparse import ArgumentParser, Namespace
 from arguments import ModelParams, PipelineParams, OptimizationParams
+
+sys.path.append(os.path.join(os.path.dirname(__file__), "traindiff"))
+from detail_unet import DetailUNet
 try:
     from torch.utils.tensorboard import SummaryWriter
     TENSORBOARD_FOUND = True
@@ -40,7 +45,30 @@ try:
 except:
     SPARSE_ADAM_AVAILABLE = False
 
-def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from):
+
+def load_detail_model(model_path: str):
+    """
+    Load a pretrained DetailUNet. Returns None if path is empty or missing.
+    """
+    if not model_path:
+        return None
+    if not os.path.isfile(model_path):
+        print(f"[WARN] Detail model not found: {model_path}. Continue without DCM.")
+        return None
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = DetailUNet().to(device)
+    state = torch.load(model_path, map_location=device)
+    model.load_state_dict(state, strict=False)
+    model.eval()
+    for p in model.parameters():
+        p.requires_grad_(False)
+    print(f"[INFO] Loaded DetailUNet from {model_path}")
+    return model
+
+def training(dataset, opt, pipe, testing_iterations, saving_iterations,
+             checkpoint_iterations, checkpoint, debug_from,
+             detail_model=None, detail_infer_size=256, detail_strength=1.0, detail_detach=False):
 
     if not SPARSE_ADAM_AVAILABLE and opt.optimizer_type == "sparse_adam":
         sys.exit(f"Trying to use sparse adam but it is not installed, please install the correct rasterizer using pip install [3dgs_accel].")
@@ -56,6 +84,11 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
     bg_color = [1, 1, 1] if dataset.white_background else [0, 0, 0]
     background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
+
+    detail_infer_size = detail_infer_size if detail_infer_size and detail_infer_size > 0 else None
+    if detail_model is not None:
+        detail_model = detail_model.to("cuda")
+        detail_model.eval()
 
     iter_start = torch.cuda.Event(enable_timing = True)
     iter_end = torch.cuda.Event(enable_timing = True)
@@ -109,22 +142,42 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         bg = torch.rand((3), device="cuda") if opt.random_background else background
 
         render_pkg = render(viewpoint_cam, gaussians, pipe, bg, use_trained_exp=dataset.train_test_exp, separate_sh=SPARSE_ADAM_AVAILABLE)
-        image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
+        render_image = render_pkg["render"]
+        viewspace_point_tensor, visibility_filter, radii = render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
 
-        # add renderded image saving
+        if viewpoint_cam.alpha_mask is not None:
+            alpha_mask = viewpoint_cam.alpha_mask.cuda()
+            render_image *= alpha_mask
+
+        detail_image = render_image
+        pred_detail = None
+        if detail_model is not None:
+            detail_input = render_image.unsqueeze(0)  # add batch dim
+            if detail_infer_size is not None:
+                detail_input = F.interpolate(detail_input, size=(detail_infer_size, detail_infer_size), mode="bilinear", align_corners=False)
+
+            pred_detail = detail_model(detail_input)
+            pred_detail = torch.clamp(pred_detail, -1.0, 1.0)
+
+            if detail_input.shape[-2:] != render_image.shape[-2:]:
+                pred_detail = F.interpolate(pred_detail, size=render_image.shape[-2:], mode="bilinear", align_corners=False)
+
+            pred_detail = pred_detail.squeeze(0)
+
+            if detail_detach:
+                pred_detail = pred_detail.detach()
+
+            detail_image = torch.clamp(render_image + detail_strength * pred_detail, 0.0, 1.0)
+
+        # add rendered image saving (after applying detail prior)
         SAVE_INTERVAL = 500
         if iteration % SAVE_INTERVAL == 0:
-            image = render_pkg["render"]
             save_path = f"{dataset.model_path}/vis/iter_{iteration:06d}.png"
             os.makedirs(f"{dataset.model_path}/vis", exist_ok=True)
 
             import torchvision
-            torchvision.utils.save_image(image, save_path)
+            torchvision.utils.save_image(detail_image, save_path)
             print(f"[VIS]Saved rendered image at iteration {iteration} to {save_path}")
-
-        if viewpoint_cam.alpha_mask is not None:
-            alpha_mask = viewpoint_cam.alpha_mask.cuda()
-            image *= alpha_mask
         
         # add ply saving
         PLY_INTERVAL = 2000
@@ -138,11 +191,11 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             
         # Loss
         gt_image = viewpoint_cam.original_image.cuda()
-        Ll1 = l1_loss(image, gt_image)
+        Ll1 = l1_loss(detail_image, gt_image)
         if FUSED_SSIM_AVAILABLE:
-            ssim_value = fused_ssim(image.unsqueeze(0), gt_image.unsqueeze(0))
+            ssim_value = fused_ssim(detail_image.unsqueeze(0), gt_image.unsqueeze(0))
         else:
-            ssim_value = ssim(image, gt_image) # SSIM = Structural Similarity Index 测量两幅图在 亮度、对比度、结构 方面的相似程度。
+            ssim_value = ssim(detail_image, gt_image) # SSIM = Structural Similarity Index 测量两幅图在 亮度、对比度、结构 方面的相似程度。
 
         loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim_value) # DSSIM = 1 - SSIM   L1：保证颜色准确 SSIM：保证结构一致
 
@@ -304,6 +357,14 @@ if __name__ == "__main__":
     parser.add_argument('--disable_viewer', action='store_true', default=False)
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default = None)
+    parser.add_argument("--detail_model", type=str, default="",
+                        help="Path to pretrained DetailUNet weights (.pth). Empty string disables DCM supervision.")
+    parser.add_argument("--detail_strength", type=float, default=1.0,
+                        help="Scale factor for the residual prior before adding it to the render.")
+    parser.add_argument("--detail_infer_size", type=int, default=256,
+                        help="Resize renders to this resolution for DCM inference; set 0 to keep original.")
+    parser.add_argument("--detail_detach", action="store_true",
+                        help="Detach DCM output to block gradients flowing through the DCM graph.")
     args = parser.parse_args(sys.argv[1:])
     args.save_iterations.append(args.iterations)
     
@@ -312,11 +373,16 @@ if __name__ == "__main__":
     # Initialize system state (RNG)
     safe_state(args.quiet)
 
+    detail_model = load_detail_model(args.detail_model)
+
     # Start GUI server, configure and run training
     if not args.disable_viewer:
         network_gui.init(args.ip, args.port)
     torch.autograd.set_detect_anomaly(args.detect_anomaly)
-    training(lp.extract(args), op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from)
+    training(lp.extract(args), op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations,
+             args.checkpoint_iterations, args.start_checkpoint, args.debug_from,
+             detail_model=detail_model, detail_infer_size=args.detail_infer_size,
+             detail_strength=args.detail_strength, detail_detach=args.detail_detach)
 
     # All done
     print("\nTraining complete.")

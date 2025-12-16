@@ -87,7 +87,57 @@ class Camera(nn.Module):
         self.projection_matrix = getProjectionMatrix(znear=self.znear, zfar=self.zfar, fovX=self.FoVx, fovY=self.FoVy).transpose(0,1).cuda()
         self.full_proj_transform = (self.world_view_transform.unsqueeze(0).bmm(self.projection_matrix.unsqueeze(0))).squeeze(0)
         self.camera_center = self.world_view_transform.inverse()[3, :3]
-        
+    
+    def sample_edge(self, xy):
+        # xy: torch tensor [N,2] in [-1,1]
+        xy_np = xy.detach().cpu().numpy()
+
+        # 如果还没有 edge_map（比如 test camera），返回全 0
+        if not hasattr(self, "edge_map") or self.edge_map is None:
+            return np.zeros(xy_np.shape[0], dtype=np.float32)
+
+        h, w = self.edge_map.shape
+        x = np.clip((xy_np[:, 0] + 1.0) * 0.5 * w, 0, w - 1)
+        y = np.clip((xy_np[:, 1] + 1.0) * 0.5 * h, 0, h - 1)
+        return self.edge_map[y.astype(int), x.astype(int)]
+
+    def sample_texture(self, xy):
+        # xy: torch tensor [N,2] in [-1,1]
+        xy_np = xy.detach().cpu().numpy()
+
+        # 如果没有 texture_map，就返回全 1（高纹理 → 不会被当成纯色背景）
+        if not hasattr(self, "texture_map") or self.texture_map is None:
+            return np.ones(xy_np.shape[0], dtype=np.float32)
+
+        h, w = self.texture_map.shape
+        x = np.clip((xy_np[:, 0] + 1.0) * 0.5 * w, 0, w - 1)
+        y = np.clip((xy_np[:, 1] + 1.0) * 0.5 * h, 0, h - 1)
+        return self.texture_map[y.astype(int), x.astype(int)]
+
+    def world_to_screen(self, xyz):
+        """
+        Input:
+            xyz: [N, 3] torch tensor, world coordinates
+
+        Output:
+            screen_xy: [N, 2], in normalized screen coords [-1,1]
+        """
+
+        # Convert to homogeneous
+        ones = torch.ones((xyz.shape[0], 1), device=xyz.device)
+        xyz_h = torch.cat([xyz, ones], dim=1)  # [N,4]
+
+        # Apply full projection (world2view * projection)
+        proj = xyz_h @ self.full_proj_transform.T  # [N,4]
+
+        # Perspective divide
+        proj = proj / proj[:, 3:4]
+
+        # Keep x,y only (normalized to [-1,1])
+        xy = proj[:, :2]
+
+        return xy
+
 class MiniCam:
     def __init__(self, width, height, fovy, fovx, znear, zfar, world_view_transform, full_proj_transform):
         self.image_width = width

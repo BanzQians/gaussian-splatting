@@ -23,7 +23,7 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
     """
  
     # Create zero tensor. We will use it to make pytorch return gradients of the 2D (screen-space) means
-    screenspace_points = torch.zeros_like(pc.get_xyz, dtype=pc.get_xyz.dtype, requires_grad=True, device="cuda") + 0
+    screenspace_points = torch.zeros_like(pc.get_xyz, dtype=pc.get_xyz.dtype, requires_grad=True, device="cuda") + 0 # 作用是：给每一个 Gaussian 预留一个“2D 屏幕坐标”的梯度容器。
     try:
         screenspace_points.retain_grad()
     except:
@@ -113,6 +113,14 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
     if use_trained_exp:
         exposure = pc.get_exposure_from_name(viewpoint_camera.image_name)
         rendered_image = torch.matmul(rendered_image.permute(1, 2, 0), exposure[:3, :3]).permute(2, 0, 1) + exposure[:3, 3,   None, None]
+    
+    # Project Gaussians to screen
+    xyz = pc.get_xyz  # [N, 3]
+    proj = viewpoint_camera.world_to_screen(xyz)  # [N, 2], normalized coords
+
+    # Sample edge/texture values
+    edge_vals = viewpoint_camera.sample_edge(proj)       # e.g., bilinear sample
+    tex_vals = viewpoint_camera.sample_texture(proj)
 
     # Those Gaussians that were frustum culled or had a radius of 0 were not visible.
     # They will be excluded from value updates used in the splitting criteria.
@@ -122,7 +130,9 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
         "viewspace_points": screenspace_points,
         "visibility_filter" : (radii > 0).nonzero(),
         "radii": radii,
-        "depth" : depth_image
+        "depth" : depth_image,
+        "edge_vals": edge_vals,
+        "tex_vals": tex_vals
         }
     
     return out

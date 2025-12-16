@@ -11,6 +11,8 @@
 
 import os
 import torch
+import cv2
+import numpy as np
 from random import randint
 from utils.loss_utils import l1_loss, ssim
 from gaussian_renderer import render, network_gui
@@ -39,6 +41,23 @@ try:
     SPARSE_ADAM_AVAILABLE = True
 except:
     SPARSE_ADAM_AVAILABLE = False
+
+def compute_edge_and_texture(img):
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+    # Edge map (Canny)
+    edge = cv2.Canny(gray, 50, 150)
+
+    # Texture map = local variance
+    blur = cv2.GaussianBlur(gray, (9, 9), 0)
+    texture = (gray.astype(np.float32) - blur.astype(np.float32))**2
+    texture = cv2.GaussianBlur(texture, (9, 9), 0)
+
+    # Normalize to 0~1
+    edge = edge.astype(np.float32) / 255.0
+    texture = texture / (texture.max() + 1e-6)
+
+    return edge, texture
 
 def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from):
 
@@ -102,6 +121,20 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         viewpoint_cam = viewpoint_stack.pop(rand_idx)
         vind = viewpoint_indices.pop(rand_idx)
 
+        # --- 只在第一次使用该 camera 时计算 edge/texture，避免重复计算 ---
+        if not hasattr(viewpoint_cam, "edge_map") or not hasattr(viewpoint_cam, "texture_map"):
+            # original_image: [C,H,W], float32, 0~1, RGB
+            img_t = viewpoint_cam.original_image.permute(1, 2, 0).cpu().numpy()  # [H,W,C], RGB
+            img_t = np.clip(img_t * 255.0, 0, 255).astype(np.uint8)
+
+            # OpenCV 用的是 BGR，这里转换一下
+            img_bgr = cv2.cvtColor(img_t, cv2.COLOR_RGB2BGR)
+
+            edge_map, texture_map = compute_edge_and_texture(img_bgr)
+
+            viewpoint_cam.edge_map = edge_map      # numpy [H,W]
+            viewpoint_cam.texture_map = texture_map
+
         # Render
         if (iteration - 1) == debug_from:
             pipe.debug = True
@@ -110,9 +143,12 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
         render_pkg = render(viewpoint_cam, gaussians, pipe, bg, use_trained_exp=dataset.train_test_exp, separate_sh=SPARSE_ADAM_AVAILABLE)
         image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
+        # === Attach edge/texture information from rendering ===
+        gaussians.edge_vals = render_pkg["edge_vals"]
+        gaussians.tex_vals = render_pkg["tex_vals"]
 
         # add renderded image saving
-        SAVE_INTERVAL = 500
+        SAVE_INTERVAL = 1000
         if iteration % SAVE_INTERVAL == 0:
             image = render_pkg["render"]
             save_path = f"{dataset.model_path}/vis/iter_{iteration:06d}.png"
@@ -206,6 +242,56 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0:
                     size_threshold = 20 if iteration > opt.opacity_reset_interval else None
                     gaussians.densify_and_prune(opt.densify_grad_threshold, 0.005, scene.cameras_extent, size_threshold, radii)
+
+                    # ===== Edge-aware sharpening + background clamp =====
+                    if hasattr(gaussians, "edge_vals") and hasattr(gaussians, "tex_vals"):
+                        # Convert numpy → torch
+                        edge_vals = torch.from_numpy(gaussians.edge_vals).float().cuda()
+                        tex_vals  = torch.from_numpy(gaussians.tex_vals).float().cuda()
+
+                        # 当前 gaussians 数量
+                        N = gaussians.get_xyz.shape[0]
+                        K = edge_vals.shape[0]
+                        if K == 0:
+                            pass
+                        else:
+                            M = min(N, K)   # 只对前 M 个做修改
+
+                            # 截取前 M 个高斯的 edge/tex 信息
+                            edge_sub = edge_vals[:M]
+                            tex_sub  = tex_vals[:M]
+
+                            # 取出当前所有 scale，然后对前 M 个做操作
+                            scales = gaussians.get_scaling          # [N,3]
+                            scales_head = scales[:M].clone()        # [M,3]
+
+                            # --- Background clamp（纯色背景区域）---
+                            low_tex_mask = tex_sub < 0.03
+                            max_bg_scale = 0.05
+                            if low_tex_mask.any():
+                                scales_head[low_tex_mask] = torch.clamp(
+                                    scales_head[low_tex_mask],
+                                    max=max_bg_scale
+                                )
+
+                            # --- Edge sharpening（边界变“薄片”）---
+                            edge_mask = edge_sub > 0.10
+                            sharpen_factor = 0.5
+                            if edge_mask.any():
+                                scales_edge = scales_head[edge_mask]
+                                min_axis = torch.argmin(scales_edge, dim=1)
+                                for i, axis in enumerate(min_axis):
+                                    scales_edge[i, axis] *= sharpen_factor
+                                scales_head[edge_mask] = scales_edge
+
+                            # 把修改后的前 M 个 scale 写回去，后面的保持不变
+                            scales[:M] = scales_head
+
+                            # 写回到 _scaling 参数（log-space）
+                            new_scaling_param = gaussians.scaling_inverse_activation(scales)
+                            optimizable = gaussians.replace_tensor_to_optimizer(new_scaling_param, "scaling")
+                            gaussians._scaling = optimizable["scaling"]
+
                 
                 if iteration % opt.opacity_reset_interval == 0 or (dataset.white_background and iteration == opt.densify_from_iter):
                     gaussians.reset_opacity()
